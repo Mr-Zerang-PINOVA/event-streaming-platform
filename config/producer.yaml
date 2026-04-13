@@ -1,0 +1,8 @@
+kafka:
+  bootstrap_servers: "${KAFKA_BROKER}"
+  topic: "${KAFKA_TOPIC}"
+  client_id: "${PRODUCER_CLIENT_ID}"
+
+producer:
+  interval_ms: 200
+  symbol: "BTCUSDT"

@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+
+readme.prompt.md
+data/scd/orderbook_levels_scd.csv

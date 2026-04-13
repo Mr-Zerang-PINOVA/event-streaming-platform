@@ -1,0 +1,29 @@
+
+# Format:
+# <topic_name> <partitions> <replication_factor>
+#
+# partitions: number of partitions for parallelism
+# replication_factor: number of replicas (must be <= number of brokers)
+#
+# For single-node Kafka (dev setup), use: 1 1
+#
+# Naming convention:
+# raw topic:  md.raw.<exchange>.<market>.depth.v1
+#             examples: binance.spot, binance.futures, bybit.linear, okx.swap
+# normalized: md.norm.depth.v1
+# scd:        md.scd.depth.levels.v1
+# versioning: bump v1 -> v2 only for breaking schema/topic contract changes
+
+# Raw layer (source-specific payloads)
+md.raw.binance.spot.depth.v1 3 1
+md.raw.binance.futures.depth.v1 3 1
+md.raw.bybit.spot.depth.v1 3 1
+md.raw.bybit.linear.depth.v1 3 1
+md.raw.okx.margin.depth.v1 3 1
+md.raw.okx.swap.depth.v1 3 1
+
+# Normalized layer (single canonical schema across exchanges)
+md.norm.depth.v1 3 1
+
+# SCD layer (level history/open-close changes)
+md.scd.depth.levels.v1 3 1

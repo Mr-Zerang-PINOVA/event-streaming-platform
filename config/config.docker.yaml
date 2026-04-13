@@ -1,0 +1,88 @@
+kafka:
+  bootstrap_servers:
+    - "kafka:9092"
+  topics:
+    raw_template: "md.raw.{exchange}.{market}.depth.v1"
+    normalized: "md.norm.depth.v1"
+    scd: "md.scd.depth.levels.v1"
+  topic_management:
+    enabled: true
+    num_partitions: 3
+    replication_factor: 1
+    timeout_ms: 10000
+    topics_file: "config/topics.txt"
+  client_id: "market-depth-pipeline"
+  linger_ms: 5
+  compression_type: "gzip"
+  max_send_retries: 3
+  retry_backoff_seconds: 1.0
+
+pipeline:
+  log_level: "INFO"
+  max_levels: 50
+  enable_scd_topic: false
+  reconnect_base_seconds: 1
+  reconnect_max_seconds: 30
+  stream_queue_maxsize: 1000
+  queue_depth_log_interval_seconds: 10
+  queue_depth_warn_threshold: 800
+
+exchanges:
+  binance:
+    enabled: true
+    websocket_max_queue: 512
+    markets:
+      spot:
+        enabled: true
+        ws_url: "wss://stream.binance.com/ws"
+        symbols:
+          - "BTCUSDT"
+          # - "ETHUSDT"
+        depth_stream: "depth@100ms"
+        alignment_timeout_seconds: 5
+        max_alignment_snapshot_refreshes: 3
+        warn_event_age_ms: 30000
+        max_event_age_ms: 180000
+      futures:
+        enabled: true
+        ws_url: "wss://fstream.binance.com/ws"
+        symbols:
+          - "BTCUSDT"
+          - "ETHUSDT"
+        depth_stream: "depth@100ms"
+        alignment_timeout_seconds: 5
+        max_alignment_snapshot_refreshes: 6
+        warn_event_age_ms: 30000
+        max_event_age_ms: 60000
+
+  bybit:
+    enabled: false
+    markets:
+      spot:
+        enabled: false
+        ws_url: "wss://stream.bybit.com/v5/public/spot"
+        symbols:
+          - "BTCUSDT"
+        channel: "orderbook.50"
+      linear:
+        enabled: false
+        ws_url: "wss://stream.bybit.com/v5/public/linear"
+        symbols:
+          - "BTCUSDT"
+        channel: "orderbook.50"
+
+  okx:
+    enabled: false
+    markets:
+      margin:
+        enabled: false
+        ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+        symbols:
+          - "BTC-USDT"
+        channel: "books"
+      swap:
+        enabled: false
+        ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+        symbols:
+          - "BTC-USDT-SWAP"
+        channel: "books"

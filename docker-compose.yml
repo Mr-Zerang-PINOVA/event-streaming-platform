@@ -1,0 +1,139 @@
+
+
+services:
+
+  # ----------------------------
+  # Kafka (KRaft mode)
+  # ----------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+    healthcheck:
+      test: ["CMD", "bash", "-c", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+
+  # ----------------------------
+  # ClickHouse 24.10
+  # ----------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.10
+    container_name: clickhouse
+    ports:
+      - "8123:8123"   # HTTP
+      - "9000:9000"   # Native
+    environment:
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_DB: marketdata
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+
+  # ----------------------------
+  # DBeaver (CloudBeaver web UI)
+  # ----------------------------
+  # dbeaver:
+  #   image: dbeaver/cloudbeaver:latest
+  #   container_name: dbeaver
+  #   user: "0:0"
+  #   depends_on:
+  #     clickhouse:
+  #       condition: service_started
+  #   environment:
+  #     CB_SERVER_ANONYMOUS_ACCESS_ENABLED: "true"
+  #   ports:
+  #     - "8978:8978"
+  #   volumes:
+  #     - dbeaver-data:/opt/cloudbeaver/workspace
+
+
+  # ----------------------------
+  # Topic initializer
+  # ----------------------------
+  init-topics:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./config/topics.txt:/config/topics.txt
+      - ./init/create-topics.sh:/create-topics.sh
+    entrypoint: ["/bin/bash", "/create-topics.sh"]
+
+
+  # ----------------------------
+  # Multi-exchange pipeline (collectors + shared Kafka producer)
+  # ----------------------------
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      init-topics:
+        condition: service_completed_successfully
+    command: ["python", "-u", "/app/main.py", "--config", "/app/config/config.docker.yaml"]
+    restart: unless-stopped
+
+
+  # ----------------------------
+  # Processor (writes to ClickHouse)
+  # ----------------------------
+  processor:
+    build: ./orderbook-processor
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started
+    environment:
+      KAFKA_BROKER: kafka:9092
+      KAFKA_TOPIC: md.norm.depth.v1
+      CONSUMER_ENV: dev
+      CONSUMER_ROLE: sink.clickhouse
+      CONSUMER_LAYER: scd
+      CONSUMER_GROUP_VERSION: 1
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DATABASE: marketdata
+      CLICKHOUSE_TABLE: orderbook_levels_scd
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      SYMBOL: BTCUSDT
+
+
+volumes:
+  kafka-data:
+  clickhouse-data:
+  dbeaver-data:
