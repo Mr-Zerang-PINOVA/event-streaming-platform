@@ -200,3 +200,13 @@ docker exec -it kafka bash -lc "kafka-run-class kafka.tools.GetOffsetShell --bro
 Interpretation:
 - Increasing `LAG` means consumer is falling behind.
 - Stable near-zero `LAG` means healthy consumption.
+
+
+# 1) Find consumer groups
+docker exec -it kafka bash -lc "kafka-consumer-groups --bootstrap-server kafka:9092 --list"
+
+# 2) Show per-partition lag for one group
+docker exec -it kafka bash -lc "kafka-consumer-groups --bootstrap-server kafka:9092 --describe --group md.dev.sink.clickhouse.scd.v1"
+
+# 3) Watch it live
+watch -n 5 "docker exec kafka bash -lc 'kafka-consumer-groups --bootstrap-server kafka:9092 --describe --group md.dev.sink.clickhouse.scd.v1'"

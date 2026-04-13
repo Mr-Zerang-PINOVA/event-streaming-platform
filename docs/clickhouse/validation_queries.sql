@@ -127,6 +127,35 @@ GROUP BY exchange, market, symbol, side, price, valid_from, valid_to
 HAVING dup_rows > 1
 ORDER BY dup_rows DESC, symbol, side, price, valid_from;
 
+
+SELECT
+    exchange,
+    market,
+    symbol,
+    side,
+    price,
+    valid_from,
+    valid_to,
+    count() AS dup_rows
+FROM marketdata.orderbook_levels_scd
+GROUP BY
+    exchange,
+    market,
+    symbol,
+    side,
+    price,
+    valid_from,
+    valid_to
+HAVING dup_rows > 1
+ORDER BY
+    dup_rows DESC,
+    symbol ASC,
+    side ASC,
+    price ASC,
+    valid_from ASC,
+    valid_to ASC;
+
+
 -- Compare total rows vs unique logical versions
 SELECT
     count() AS total_rows,
