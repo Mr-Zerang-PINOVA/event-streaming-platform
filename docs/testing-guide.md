@@ -8,6 +8,7 @@ Run from project root:
 
 ```bash
 cd /home/ubuntu/event-streaming-platform
+systemctl status docker
 docker compose ps
 ```
 
@@ -29,6 +30,42 @@ Expected:
 - `MemAvailable` is not critically low
 - `Cached` and `Buffers` are present, which is normal on Linux
 - If available memory is consistently tight, Docker services may slow down or restart under pressure
+
+### 1.2 Pipeline WebSocket buffering settings
+
+These settings affect how much incoming market-data traffic can be buffered in memory before the collector processes it.
+
+- `websocket_max_queue`
+  - Maximum number of incoming WebSocket messages buffered internally by the `websockets` client per connection.
+  - Higher values tolerate short bursts better but increase memory usage.
+  - Lower values reduce memory usage and apply backpressure sooner.
+
+- `websocket_max_size_bytes`
+  - Maximum allowed size in bytes for a single incoming WebSocket message.
+  - Protects the process from unexpectedly large messages consuming excessive memory.
+  - If set too low, valid exchange messages may be rejected.
+
+- `WebSocket queue`
+  - This means the `websockets` library's internal receive queue, not the pipeline's per-stream output queue.
+  - Incoming messages wait here before the collector reads them in the `async for raw_message in websocket_client` loop.
+
+Where configured:
+
+```yaml
+exchanges:
+  binance:
+    websocket_max_queue: 32
+    websocket_max_size_bytes: 1048576
+```
+
+Memory rule of thumb:
+
+`number_of_connections * websocket_max_queue * average_message_size`
+
+Practical guidance:
+- If pipeline memory keeps climbing while queue depth and consumer lag stay low, reduce `websocket_max_queue`.
+- If you see rejected or oversized WebSocket frames, review `websocket_max_size_bytes`.
+- Tune these together with host memory, enabled symbols, and exchange burst rate.
 
 ## 2) Exchange Connectivity Tests
 

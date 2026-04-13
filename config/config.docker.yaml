@@ -30,7 +30,8 @@ pipeline:
 exchanges:
   binance:
     enabled: true
-    websocket_max_queue: 512
+    websocket_max_queue: 32
+    websocket_max_size_bytes: 1048576
     markets:
       spot:
         enabled: true

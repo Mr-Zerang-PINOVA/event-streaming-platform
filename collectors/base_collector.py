@@ -21,7 +21,8 @@ class BaseCollector(abc.ABC):
         reconnect_max_seconds: float = 30.0,
         ping_interval_seconds: float = 20.0,
         ping_timeout_seconds: float = 20.0,
-        websocket_max_queue: int = 4096,
+        websocket_max_queue: int = 32,
+        websocket_max_size_bytes: int = 1048576,
         **_,
     ) -> None:
         self.exchange = exchange
@@ -33,7 +34,8 @@ class BaseCollector(abc.ABC):
         self.reconnect_max_seconds = reconnect_max_seconds
         self.ping_interval_seconds = ping_interval_seconds
         self.ping_timeout_seconds = ping_timeout_seconds
-        self.websocket_max_queue = max(1, int(websocket_max_queue or 4096))
+        self.websocket_max_queue = max(1, int(websocket_max_queue or 32))
+        self.websocket_max_size_bytes = max(1024, int(websocket_max_size_bytes or 1048576))
         self.logger = logging.getLogger(f"collector.{exchange}.{market}.{symbol}")
         self._stop_event = asyncio.Event()
 
@@ -49,6 +51,7 @@ class BaseCollector(abc.ABC):
                     self.ws_url,
                     ping_interval=self.ping_interval_seconds,
                     ping_timeout=self.ping_timeout_seconds,
+                    max_size=self.websocket_max_size_bytes,
                     max_queue=self.websocket_max_queue,
                 ) as websocket_client:
                     self.logger.info("Connected. Subscribing symbol=%s", self.symbol)

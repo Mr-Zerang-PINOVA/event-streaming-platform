@@ -54,6 +54,7 @@ class BinanceCollector(BaseCollector):
                     self.ws_url,
                     ping_interval=self.ping_interval_seconds,
                     ping_timeout=self.ping_timeout_seconds,
+                    max_size=self.websocket_max_size_bytes,
                     max_queue=self.websocket_max_queue,
                 ) as websocket_client:
                     self.logger.info("Connected. Subscribing symbol=%s", self.symbol)
