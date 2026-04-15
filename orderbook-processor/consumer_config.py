@@ -24,7 +24,7 @@ def resolve_consumer_runtime_config(default_config_path: str = "config/config.ya
         os.getenv("AUTO_OFFSET_RESET", _deep_get(config, "consumer.kafka.auto_offset_reset", "earliest"))
     )
     enable_auto_commit = _resolve_bool(
-        os.getenv("ENABLE_AUTO_COMMIT", _deep_get(config, "consumer.kafka.enable_auto_commit", True))
+        os.getenv("ENABLE_AUTO_COMMIT", _deep_get(config, "consumer.kafka.enable_auto_commit", False))
     )
 
     return ConsumerRuntimeConfig(

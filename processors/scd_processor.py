@@ -1,8 +1,9 @@
-import hashlib
 import logging
 import time
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
+
+from contracts.event_ids import make_scd_row_id
 
 
 class SCDProcessor:
@@ -19,6 +20,10 @@ class SCDProcessor:
         sequence = _safe_int(normalized_event.get("sequence"))
         prev_sequence = _safe_int(normalized_event.get("prev_sequence"))
         ingest_time_ms = int(time.time() * 1000)
+        normalized_event_id = _as_optional_str(
+            normalized_event.get("normalized_event_id") or normalized_event.get("event_id")
+        )
+        raw_event_id = _as_optional_str(normalized_event.get("raw_event_id"))
 
         stream_key = f"{exchange}:{market}:{symbol}"
         stream_state = self._state.setdefault(stream_key, {"bids": {}, "asks": {}})
@@ -40,6 +45,8 @@ class SCDProcessor:
                     ingest_time_ms=ingest_time_ms,
                     sequence=sequence,
                     prev_sequence=prev_sequence,
+                    normalized_event_id=normalized_event_id,
+                    raw_event_id=raw_event_id,
                 )
             else:
                 events = self._apply_delta_side(
@@ -54,6 +61,8 @@ class SCDProcessor:
                     ingest_time_ms=ingest_time_ms,
                     sequence=sequence,
                     prev_sequence=prev_sequence,
+                    normalized_event_id=normalized_event_id,
+                    raw_event_id=raw_event_id,
                 )
             scd_events.extend(events)
 
@@ -79,6 +88,8 @@ class SCDProcessor:
         ingest_time_ms: int,
         sequence: Optional[int],
         prev_sequence: Optional[int],
+        normalized_event_id: Optional[str],
+        raw_event_id: Optional[str],
     ) -> List[Dict[str, Any]]:
         normalized_incoming: Dict[str, str] = {}
         for price, qty in self._normalize_levels(levels):
@@ -102,6 +113,8 @@ class SCDProcessor:
                     ingest_time_ms=ingest_time_ms,
                     sequence=sequence,
                     prev_sequence=prev_sequence,
+                    normalized_event_id=normalized_event_id,
+                    raw_event_id=raw_event_id,
                     reason="snapshot_replace",
                 )
             )
@@ -123,6 +136,8 @@ class SCDProcessor:
                             ingest_time_ms=ingest_time_ms,
                             sequence=sequence,
                             prev_sequence=prev_sequence,
+                            normalized_event_id=normalized_event_id,
+                            raw_event_id=raw_event_id,
                             reason="snapshot_zero_qty",
                         )
                     )
@@ -146,6 +161,8 @@ class SCDProcessor:
                         ingest_time_ms=ingest_time_ms,
                         sequence=sequence,
                         prev_sequence=prev_sequence,
+                        normalized_event_id=normalized_event_id,
+                        raw_event_id=raw_event_id,
                         change_type="open",
                     )
                 )
@@ -165,6 +182,8 @@ class SCDProcessor:
                         ingest_time_ms=ingest_time_ms,
                         sequence=sequence,
                         prev_sequence=prev_sequence,
+                        normalized_event_id=normalized_event_id,
+                        raw_event_id=raw_event_id,
                         reason="update",
                     )
                 )
@@ -183,6 +202,8 @@ class SCDProcessor:
                         ingest_time_ms=ingest_time_ms,
                         sequence=sequence,
                         prev_sequence=prev_sequence,
+                        normalized_event_id=normalized_event_id,
+                        raw_event_id=raw_event_id,
                         change_type="update",
                     )
                 )
@@ -202,6 +223,8 @@ class SCDProcessor:
         ingest_time_ms: int,
         sequence: Optional[int],
         prev_sequence: Optional[int],
+        normalized_event_id: Optional[str],
+        raw_event_id: Optional[str],
     ) -> List[Dict[str, Any]]:
         events: List[Dict[str, Any]] = []
         for price, qty in self._normalize_levels(levels):
@@ -222,6 +245,8 @@ class SCDProcessor:
                         ingest_time_ms=ingest_time_ms,
                         sequence=sequence,
                         prev_sequence=prev_sequence,
+                        normalized_event_id=normalized_event_id,
+                        raw_event_id=raw_event_id,
                         reason="delete",
                     )
                 )
@@ -244,6 +269,8 @@ class SCDProcessor:
                         ingest_time_ms=ingest_time_ms,
                         sequence=sequence,
                         prev_sequence=prev_sequence,
+                        normalized_event_id=normalized_event_id,
+                        raw_event_id=raw_event_id,
                         change_type="open",
                     )
                 )
@@ -265,6 +292,8 @@ class SCDProcessor:
                     ingest_time_ms=ingest_time_ms,
                     sequence=sequence,
                     prev_sequence=prev_sequence,
+                    normalized_event_id=normalized_event_id,
+                    raw_event_id=raw_event_id,
                     reason="update",
                 )
             )
@@ -283,6 +312,8 @@ class SCDProcessor:
                     ingest_time_ms=ingest_time_ms,
                     sequence=sequence,
                     prev_sequence=prev_sequence,
+                    normalized_event_id=normalized_event_id,
+                    raw_event_id=raw_event_id,
                     change_type="update",
                 )
             )
@@ -309,11 +340,18 @@ class SCDProcessor:
         ingest_time_ms: int,
         sequence: Optional[int],
         prev_sequence: Optional[int],
+        normalized_event_id: Optional[str],
+        raw_event_id: Optional[str],
         change_type: str,
     ) -> Dict[str, Any]:
+        source_event_id = normalized_event_id or raw_event_id
         payload = {
             "schema_version": 1,
+            "contract_version": 1,
             "layer": "scd",
+            "normalized_event_id": normalized_event_id,
+            "raw_event_id": raw_event_id,
+            "source_event_id": source_event_id,
             "exchange": exchange,
             "market": market,
             "symbol": symbol,
@@ -333,7 +371,24 @@ class SCDProcessor:
             "event_time_ms": event_time_ms,
             "ingest_time_ms": ingest_time_ms,
         }
-        payload["scd_event_id"] = _make_scd_event_id(payload)
+        scd_row_id = make_scd_row_id(
+            exchange=exchange,
+            market=market,
+            symbol=symbol,
+            side=side,
+            price=price,
+            qty=entry["qty"],
+            valid_from_ms=entry["valid_from_ms"],
+            valid_to_ms=None,
+            source_event_id=source_event_id,
+            change_type=change_type,
+            source_sequence=sequence,
+            open_sequence=entry.get("open_sequence"),
+            close_sequence=None,
+        )
+        payload["event_id"] = scd_row_id
+        payload["scd_row_id"] = scd_row_id
+        payload["scd_event_id"] = scd_row_id
         return payload
 
     def _build_close_event(
@@ -349,11 +404,18 @@ class SCDProcessor:
         ingest_time_ms: int,
         sequence: Optional[int],
         prev_sequence: Optional[int],
+        normalized_event_id: Optional[str],
+        raw_event_id: Optional[str],
         reason: str,
     ) -> Dict[str, Any]:
+        source_event_id = normalized_event_id or raw_event_id
         payload = {
             "schema_version": 1,
+            "contract_version": 1,
             "layer": "scd",
+            "normalized_event_id": normalized_event_id,
+            "raw_event_id": raw_event_id,
+            "source_event_id": source_event_id,
             "exchange": exchange,
             "market": market,
             "symbol": symbol,
@@ -373,7 +435,25 @@ class SCDProcessor:
             "event_time_ms": event_time_ms,
             "ingest_time_ms": ingest_time_ms,
         }
-        payload["scd_event_id"] = _make_scd_event_id(payload)
+        scd_row_id = make_scd_row_id(
+            exchange=exchange,
+            market=market,
+            symbol=symbol,
+            side=side,
+            price=price,
+            qty=entry["qty"],
+            valid_from_ms=entry.get("valid_from_ms"),
+            valid_to_ms=event_time_ms,
+            source_event_id=source_event_id,
+            change_type="close",
+            close_reason=reason,
+            source_sequence=sequence,
+            open_sequence=entry.get("open_sequence"),
+            close_sequence=sequence,
+        )
+        payload["event_id"] = scd_row_id
+        payload["scd_row_id"] = scd_row_id
+        payload["scd_event_id"] = scd_row_id
         return payload
 
     @staticmethod
@@ -424,12 +504,8 @@ def _is_zero_qty(value: str) -> bool:
         return False
 
 
-def _make_scd_event_id(payload: Dict[str, Any]) -> str:
-    base = (
-        f"{payload.get('exchange')}|{payload.get('market')}|{payload.get('symbol')}|"
-        f"{payload.get('side')}|{payload.get('price')}|{payload.get('qty')}|"
-        f"{payload.get('valid_from_ms')}|{payload.get('valid_to_ms')}|"
-        f"{payload.get('change_type')}|{payload.get('source_sequence')}|"
-        f"{payload.get('close_reason')}"
-    )
-    return hashlib.sha256(base.encode("utf-8")).hexdigest()
+def _as_optional_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

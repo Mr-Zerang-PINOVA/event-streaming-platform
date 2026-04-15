@@ -27,6 +27,16 @@ pipeline:
   queue_depth_log_interval_seconds: 10
   queue_depth_warn_threshold: 800
 
+consumer:
+  group:
+    env: "dev"
+    role: "sink.clickhouse"
+    layer: "scd"
+    version: 2
+  kafka:
+    auto_offset_reset: "earliest"
+    enable_auto_commit: false
+
 exchanges:
   binance:
     enabled: true
@@ -57,32 +67,32 @@ exchanges:
         max_event_age_ms: 60000
 
   bybit:
-    enabled: false
+    enabled: true
     markets:
       spot:
-        enabled: false
+        enabled: true
         ws_url: "wss://stream.bybit.com/v5/public/spot"
         symbols:
           - "BTCUSDT"
         channel: "orderbook.50"
       linear:
-        enabled: false
+        enabled: true
         ws_url: "wss://stream.bybit.com/v5/public/linear"
         symbols:
           - "BTCUSDT"
         channel: "orderbook.50"
 
   okx:
-    enabled: false
+    enabled: true
     markets:
       margin:
-        enabled: false
+        enabled: true
         ws_url: "wss://ws.okx.com:8443/ws/v5/public"
         symbols:
           - "BTC-USDT"
         channel: "books"
       swap:
-        enabled: false
+        enabled: true
         ws_url: "wss://ws.okx.com:8443/ws/v5/public"
         symbols:
           - "BTC-USDT-SWAP"

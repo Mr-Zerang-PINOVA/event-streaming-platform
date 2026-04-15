@@ -3,6 +3,7 @@ import logging
 import time
 from typing import Any, Dict, Optional, Tuple
 
+from contracts.event_ids import make_raw_event_id
 from processors.data_processor import DataProcessor
 from processors.scd_processor import SCDProcessor
 from producers.kafka_producer import KafkaDepthProducer
@@ -124,7 +125,12 @@ class OutputHandler:
             exchange,
             market,
             symbol,
-            {**raw_update, "collector_receive_ts_ms": collector_receive_ts_ms},
+            {
+                **raw_update,
+                "collector_receive_ts_ms": collector_receive_ts_ms,
+                "raw_event_id": raw_event["raw_event_id"],
+                "event_id": raw_event["event_id"],
+            },
         )
         if normalized is None:
             return
@@ -191,14 +197,34 @@ class OutputHandler:
         raw_payload: Dict,
         collector_receive_ts_ms: int,
     ) -> Dict:
+        event_time_ms = int(raw_update.get("event_time_ms", int(time.time() * 1000)))
+        event_type = str(raw_update.get("event_type", "delta")).lower()
+        raw_event_id = make_raw_event_id(
+            exchange=exchange,
+            market=market,
+            symbol=symbol,
+            event_type=event_type,
+            event_time_ms=event_time_ms,
+            sequence=raw_update.get("sequence"),
+            prev_sequence=raw_update.get("prev_sequence"),
+            update_id_from=raw_update.get("update_id_from"),
+            update_id_to=raw_update.get("update_id_to"),
+            snapshot_last_update_id=raw_update.get("snapshot_last_update_id"),
+            bids=raw_update.get("bids", []),
+            asks=raw_update.get("asks", []),
+            source_payload=raw_payload,
+        )
         return {
             "schema_version": 1,
+            "contract_version": 1,
             "layer": "raw",
+            "event_id": raw_event_id,
+            "raw_event_id": raw_event_id,
             "exchange": exchange,
             "market": market,
             "symbol": symbol,
-            "event_type": str(raw_update.get("event_type", "delta")).lower(),
-            "event_time_ms": int(raw_update.get("event_time_ms", int(time.time() * 1000))),
+            "event_type": event_type,
+            "event_time_ms": event_time_ms,
             "collector_receive_ts_ms": collector_receive_ts_ms,
             "ingest_time_ms": int(time.time() * 1000),
             "sequence": raw_update.get("sequence"),

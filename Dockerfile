@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -U pip setuptools wheel \
  && pip install --no-cache-dir -r /app/requirements.txt
 
 COPY collectors/ /app/collectors/
+COPY contracts/ /app/contracts/
 COPY processors/ /app/processors/
 COPY producers/ /app/producers/
 COPY config/ /app/config/

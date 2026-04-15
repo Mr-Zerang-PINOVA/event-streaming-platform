@@ -167,8 +167,6 @@ docker exec -it clickhouse clickhouse-client -u clickhouse --password clickhouse
 SELECT
     table,
     formatReadableSize(sum(bytes_on_disk)) AS on_disk,
-    formatReadableSize(sum(data_compressed_bytes)) AS compressed,
-    formatReadableSize(sum(data_uncompressed_bytes)) AS uncompressed,
     sum(rows) AS rows
 FROM system.parts
 WHERE database = 'marketdata'
@@ -178,6 +176,10 @@ GROUP BY table
 ORDER BY table;"
 ```
 
+```bash
+docker exec -it clickhouse sh -lc "du -sh /var/lib/clickhouse 2>/dev/null"
+
+```
 ## 4) Sequence Gap Monitoring
 
 Use this to verify whether gaps are only startup-related or persistent.

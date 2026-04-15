@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from kafka import KafkaConsumer
 import clickhouse_connect
 
+from contracts.event_ids import make_scd_row_id, resolve_event_id
 from consumer_config import resolve_consumer_runtime_config
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
@@ -162,6 +163,7 @@ def main():
         nonlocal pending_scd_rows, pending_raw_rows, last_flush_ms
         due = (now_ms() - last_flush_ms) >= INSERT_FLUSH_INTERVAL_MS
         should_flush = force or due
+        wrote_rows = False
 
         if pending_scd_rows and (force or due or len(pending_scd_rows) >= INSERT_BATCH_SIZE):
             ch_client.insert(
@@ -175,6 +177,7 @@ def main():
             )
             pending_scd_rows = []
             should_flush = True
+            wrote_rows = True
         if pending_raw_rows and (force or due or len(pending_raw_rows) >= INSERT_BATCH_SIZE):
             ch_client.insert(
                 table=f"{CLICKHOUSE_DATABASE}.{CLICKHOUSE_RAW_TABLE}",
@@ -187,9 +190,16 @@ def main():
             )
             pending_raw_rows = []
             should_flush = True
+            wrote_rows = True
 
         if should_flush:
             last_flush_ms = now_ms()
+        return wrote_rows
+
+    def flush_and_commit(force: bool = False) -> None:
+        wrote_rows = flush_rows(force=force)
+        if wrote_rows and not consumer_runtime_config.enable_auto_commit:
+            consumer.commit()
 
     def get_stream_state(stream_key):
         stream_state = stream_states.get(stream_key)
@@ -301,14 +311,29 @@ def main():
         u_from,
         u_to,
         source_event_type,
-        event_id,
+        source_event_id,
     ):
         ingest_ts = now_ms()
+        row_event_id = make_scd_row_id(
+            exchange=exchange,
+            market=market,
+            symbol=symbol,
+            side=side,
+            price=price,
+            qty=prev["qty"],
+            valid_from_ms=prev["valid_from"],
+            valid_to_ms=valid_to,
+            source_event_id=source_event_id,
+            change_type="close",
+            source_sequence=u_to,
+            open_sequence=prev.get("open_sequence"),
+            close_sequence=u_to,
+        )
         return [
             exchange, market, symbol, side, price, prev["qty"],
             prev["valid_from"], valid_to,
             prev["origin_type"], source_event_type,
-            u_from, u_to, event_id, ingest_ts
+            u_from, u_to, row_event_id, ingest_ts
         ]
 
     def open_level(
@@ -322,14 +347,30 @@ def main():
         source_event_type,
         u_from,
         u_to,
-        event_id,
+        source_event_id,
+        change_type,
     ):
         ingest_ts = now_ms()
+        row_event_id = make_scd_row_id(
+            exchange=exchange,
+            market=market,
+            symbol=symbol,
+            side=side,
+            price=price,
+            qty=qty,
+            valid_from_ms=valid_from,
+            valid_to_ms=None,
+            source_event_id=source_event_id,
+            change_type=change_type,
+            source_sequence=u_to,
+            open_sequence=u_to,
+            close_sequence=None,
+        )
         return [
             exchange, market, symbol, side, price, qty,
             valid_from, None,
             source_event_type, None,
-            u_from, u_to, event_id, ingest_ts
+            u_from, u_to, row_event_id, ingest_ts
         ]
 
     def apply_updates(
@@ -340,7 +381,7 @@ def main():
         event_time_ms,
         u_from,
         u_to,
-        event_id,
+        source_event_id,
         bids,
         asks,
         book_state,
@@ -368,7 +409,7 @@ def main():
                                     valid_to=valid_from,
                                     u_from=u_from, u_to=u_to,
                                     source_event_type=source_event_type,
-                                    event_id=event_id,
+                                    source_event_id=source_event_id,
                                 )
                             )
                         else:
@@ -388,7 +429,8 @@ def main():
                                 valid_from,
                                 source_event_type,
                                 u_from, u_to,
-                                event_id=event_id,
+                                source_event_id=source_event_id,
+                                change_type="open",
                             )
                         )
                     else:
@@ -415,7 +457,7 @@ def main():
                             valid_to=valid_from,
                             u_from=u_from, u_to=u_to,
                             source_event_type=source_event_type,
-                            event_id=event_id,
+                            source_event_id=source_event_id,
                         )
                     )
                 else:
@@ -431,7 +473,8 @@ def main():
                             valid_from,
                             source_event_type,
                             u_from, u_to,
-                            event_id=event_id,
+                            source_event_id=source_event_id,
+                            change_type="update",
                         )
                     )
                 else:
@@ -452,7 +495,7 @@ def main():
         symbol,
         event_time_ms,
         snapshot_u,
-        event_id,
+        source_event_id,
         book_state,
     ):
         nonlocal duplicate_close_skipped
@@ -479,7 +522,7 @@ def main():
                     u_from=snapshot_u,
                     u_to=snapshot_u,
                     source_event_type="snapshot",
-                    event_id=event_id,
+                    source_event_id=source_event_id,
                 )
             )
 
@@ -492,7 +535,7 @@ def main():
         symbol,
         event_time_ms,
         u_to,
-        event_id,
+        source_event_id,
         require_snapshot: bool = False,
     ):
         nonlocal total_rows_processed
@@ -502,7 +545,7 @@ def main():
             symbol=symbol,
             event_time_ms=event_time_ms,
             snapshot_u=u_to,
-            event_id=event_id,
+            source_event_id=source_event_id,
             book_state=stream_state["book_state"],
         )
         append_rows(reset_close_rows)
@@ -556,7 +599,7 @@ def main():
             to_non_negative_int(snapshot_u_value, u_to) if snapshot_u_value is not None else None
         )
 
-        event_id = event.get("event_id") or event.get("scd_event_id")
+        event_id = resolve_event_id(event)
         if not event_id:
             event_id = f"{exchange}|{market}|{symbol}|{event_type}|{u_from}|{u_to}|{event_time_ms}"
 
@@ -574,6 +617,7 @@ def main():
             snapshot_last_update_id=snapshot_u,
         )
         if mark_seen_event(str(event_id) if event_id is not None else ""):
+            flush_and_commit(force=False)
             continue
         flush_rows(force=False)
 
@@ -594,6 +638,7 @@ def main():
                     f"[processor] stream={stream_key} ignored stale snapshot "
                     f"lastUpdateId={incoming_snapshot_u} last_applied_u={stream_state['last_applied_u']}"
                 )
+                flush_and_commit(force=False)
                 continue
 
             stream_state["snapshot_last_update_id"] = incoming_snapshot_u
@@ -612,7 +657,7 @@ def main():
                 symbol=symbol,
                 event_time_ms=event_time_ms,
                 snapshot_u=incoming_snapshot_u,
-                event_id=event_id,
+                source_event_id=event_id,
                 book_state=book_state,
             )
             append_rows(snapshot_close_rows)
@@ -630,7 +675,7 @@ def main():
                 event_time_ms=event_time_ms,
                 u_from=incoming_snapshot_u,
                 u_to=incoming_snapshot_u,
-                event_id=event_id,
+                source_event_id=event_id,
                 bids=bids,
                 asks=asks,
                 book_state=book_state,
@@ -642,13 +687,16 @@ def main():
                 f"[processor] stream={stream_key} snapshot loaded "
                 f"lastUpdateId={incoming_snapshot_u} open_levels={len(book_state)}"
             )
+            flush_and_commit(force=False)
             continue
 
         # --- DELTA ---
         if event_type != "delta":
+            flush_and_commit(force=False)
             continue
 
         if stream_state["awaiting_snapshot"]:
+            flush_and_commit(force=False)
             continue
 
         # Bootstrapping mode for streams that do not provide snapshots in this topic.
@@ -661,7 +709,7 @@ def main():
                 event_time_ms=event_time_ms,
                 u_from=u_from,
                 u_to=u_to,
-                event_id=event_id,
+                source_event_id=event_id,
                 bids=bids,
                 asks=asks,
                 book_state=book_state,
@@ -677,10 +725,12 @@ def main():
                 f"[processor] stream={stream_key} bootstrapped from delta u={u_to} "
                 f"rows={len(rows)} open_levels={len(book_state)}"
             )
+            flush_and_commit(force=False)
             continue
 
         # Ignore fully stale deltas (idempotency / replay safety)
         if stream_state["last_applied_u"] is not None and u_to <= stream_state["last_applied_u"]:
+            flush_and_commit(force=False)
             continue
 
         target = stream_state["snapshot_last_update_id"] + 1
@@ -700,7 +750,7 @@ def main():
                     event_time_ms=event_time_ms,
                     u_from=u_from,
                     u_to=u_to,
-                    event_id=event_id,
+                    source_event_id=event_id,
                     bids=bids,
                     asks=asks,
                     book_state=book_state,
@@ -715,6 +765,7 @@ def main():
                     f"[processor] stream={stream_key} aligned on delta U={u_from}..u={u_to} target={target} "
                     f"closed_rows={len(rows)} open_levels={len(book_state)}"
                 )
+                flush_and_commit(force=False)
                 continue
 
             # Delta is ahead of target but doesn't bridge -> resync needed
@@ -729,9 +780,10 @@ def main():
                 symbol=symbol,
                 event_time_ms=event_time_ms,
                 u_to=u_to,
-                event_id=event_id,
+                source_event_id=event_id,
                 require_snapshot=True,
             )
+            flush_and_commit(force=False)
             continue
 
         # 2) After alignment: handle overlap, stale, and gaps.
@@ -753,9 +805,10 @@ def main():
                         symbol=symbol,
                         event_time_ms=event_time_ms,
                         u_to=u_to,
-                        event_id=event_id,
+                        source_event_id=event_id,
                         require_snapshot=True,
                     )
+                    flush_and_commit(force=False)
                     continue
             elif u_from > stream_state["expected_next_u"]:
                 # Real gap: we are missing updates
@@ -770,9 +823,10 @@ def main():
                     symbol=symbol,
                     event_time_ms=event_time_ms,
                     u_to=u_to,
-                    event_id=event_id,
+                    source_event_id=event_id,
                     require_snapshot=True,
                 )
+                flush_and_commit(force=False)
                 continue
             # Overlap is OK: u_from <= expected_next_u <= u_to
 
@@ -784,7 +838,7 @@ def main():
             event_time_ms=event_time_ms,
             u_from=u_from,
             u_to=u_to,
-            event_id=event_id,
+            source_event_id=event_id,
             bids=bids,
             asks=asks,
             book_state=book_state,
@@ -806,7 +860,7 @@ def main():
                 f"pending_raw={len(pending_raw_rows)} pending_scd={len(pending_scd_rows)} "
                 f"duplicate_open_skipped={duplicate_open_skipped} duplicate_close_skipped={duplicate_close_skipped}"
             )
-        flush_rows(force=False)
+        flush_and_commit(force=False)
 
 if __name__ == "__main__":
     main()

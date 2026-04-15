@@ -30,6 +30,9 @@ consumer:
     role: "sink.clickhouse"
     layer: "scd"
     version: 1
+  kafka:
+    auto_offset_reset: "earliest"
+    enable_auto_commit: false
 
 exchanges:
   binance:

@@ -3,6 +3,8 @@ import time
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
+from contracts.event_ids import make_normalized_event_id
+
 
 class DataProcessor:
     def __init__(self, max_levels: int = 50) -> None:
@@ -26,6 +28,7 @@ class DataProcessor:
         update_id_to = _safe_int(raw_update.get("update_id_to"), sequence)
         snapshot_last_update_id = _safe_int(raw_update.get("snapshot_last_update_id"))
         event_type = str(raw_update.get("event_type", "delta")).lower()
+        raw_event_id = raw_update.get("raw_event_id") or raw_update.get("event_id")
 
         if not self._validate_sequence(stream_key, sequence, prev_sequence, event_type):
             return None
@@ -36,9 +39,29 @@ class DataProcessor:
             self.logger.debug("Skipping empty orderbook update stream=%s", stream_key)
             return None
 
+        normalized_event_id = make_normalized_event_id(
+            raw_event_id=str(raw_event_id) if raw_event_id else None,
+            exchange=exchange,
+            market=market,
+            symbol=symbol,
+            event_type=event_type,
+            event_time_ms=event_time_ms,
+            sequence=sequence,
+            prev_sequence=prev_sequence,
+            update_id_from=update_id_from,
+            update_id_to=update_id_to,
+            snapshot_last_update_id=snapshot_last_update_id,
+            bids=bids,
+            asks=asks,
+        )
         return {
             "schema_version": 1,
+            "contract_version": 1,
             "layer": "normalized",
+            "event_id": normalized_event_id,
+            "normalized_event_id": normalized_event_id,
+            "raw_event_id": str(raw_event_id) if raw_event_id else None,
+            "source_event_id": str(raw_event_id) if raw_event_id else None,
             "exchange": exchange,
             "market": market,
             "symbol": symbol,
