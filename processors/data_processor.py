@@ -11,6 +11,7 @@ class DataProcessor:
         self.max_levels = max_levels
         self.logger = logging.getLogger("processor.data")
         self._last_sequence_by_stream: Dict[str, int] = {}
+        self._awaiting_snapshot_by_stream: Dict[str, bool] = {}
 
     def process(
         self,
@@ -86,14 +87,39 @@ class DataProcessor:
         event_type: str,
     ) -> bool:
         if sequence is None:
+            if event_type != "snapshot" and self._awaiting_snapshot_by_stream.get(stream_key, False):
+                self.logger.warning(
+                    "Awaiting snapshot; delta skipped stream=%s current_sequence=%s",
+                    stream_key,
+                    sequence,
+                )
+                return False
             return True
 
         if event_type == "snapshot":
             self._last_sequence_by_stream[stream_key] = sequence
+            self._awaiting_snapshot_by_stream[stream_key] = False
             self.logger.info("Sequence baseline reset stream=%s snapshot_sequence=%s", stream_key, sequence)
             return True
 
+        if self._awaiting_snapshot_by_stream.get(stream_key, False):
+            self.logger.warning(
+                "Awaiting snapshot; delta skipped stream=%s current_sequence=%s",
+                stream_key,
+                sequence,
+            )
+            return False
+
         last_sequence = self._last_sequence_by_stream.get(stream_key)
+        if last_sequence is None and prev_sequence is not None:
+            self._awaiting_snapshot_by_stream[stream_key] = True
+            self.logger.warning(
+                "Delta received before snapshot stream=%s received_prev=%s received_seq=%s",
+                stream_key,
+                prev_sequence,
+                sequence,
+            )
+            return False
         if last_sequence is not None and sequence <= last_sequence:
             self.logger.warning(
                 "Out-of-order or duplicate event skipped stream=%s last_sequence=%s current_sequence=%s",
@@ -104,13 +130,15 @@ class DataProcessor:
             return False
 
         if last_sequence is not None and prev_sequence is not None and prev_sequence != last_sequence:
+            self._awaiting_snapshot_by_stream[stream_key] = True
             self.logger.warning(
-                "Sequence gap detected stream=%s expected_prev=%s received_prev=%s received_seq=%s",
+                "Sequence gap detected stream=%s expected_prev=%s received_prev=%s received_seq=%s. Awaiting snapshot.",
                 stream_key,
                 last_sequence,
                 prev_sequence,
                 sequence,
             )
+            return False
 
         self._last_sequence_by_stream[stream_key] = sequence
         return True

@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .base_collector import BaseCollector
 
@@ -9,8 +9,10 @@ class BybitCollector(BaseCollector):
     def __init__(self, channel: str = "orderbook.50", **kwargs) -> None:
         super().__init__(**kwargs)
         self.channel = channel
+        self._last_sequence: Optional[int] = None
 
     async def subscribe(self, websocket_client: Any) -> None:
+        self._last_sequence = None
         topic = f"{self.channel}.{self.symbol}"
         subscribe_message = {"op": "subscribe", "args": [topic]}
         await websocket_client.send(json.dumps(subscribe_message))
@@ -18,6 +20,8 @@ class BybitCollector(BaseCollector):
 
     def extract_depth_updates(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         if payload.get("op") == "subscribe":
+            if payload.get("success") is False:
+                raise _BybitResyncRequired(f"subscribe failed payload={payload}")
             return []
         if payload.get("ret_msg") == "pong":
             return []
@@ -41,13 +45,39 @@ class BybitCollector(BaseCollector):
         event_type = "snapshot" if str(payload.get("type", "")).lower() == "snapshot" else "delta"
         sequence = _safe_int(data.get("u"), _safe_int(data.get("seq")))
         event_time_ms = _safe_int(data.get("cts"), _safe_int(payload.get("ts"), int(time.time() * 1000)))
+        if sequence is None:
+            raise _BybitResyncRequired(f"missing sequence payload={payload}")
+
+        if event_type == "snapshot":
+            self._last_sequence = sequence
+            prev_sequence = None
+            snapshot_last_update_id = sequence
+        else:
+            last_sequence = self._last_sequence
+            if last_sequence is None:
+                raise _BybitResyncRequired(
+                    f"delta received before snapshot symbol={self.symbol} sequence={sequence}"
+                )
+            if sequence <= last_sequence:
+                return []
+            expected_sequence = last_sequence + 1
+            if sequence != expected_sequence:
+                raise _BybitResyncRequired(
+                    f"sequence gap symbol={self.symbol} expected={expected_sequence} got={sequence}"
+                )
+            prev_sequence = last_sequence
+            snapshot_last_update_id = None
+            self._last_sequence = sequence
 
         return [
             {
                 "event_type": event_type,
                 "event_time_ms": event_time_ms,
                 "sequence": sequence,
-                "prev_sequence": None,
+                "prev_sequence": prev_sequence,
+                "snapshot_last_update_id": snapshot_last_update_id,
+                "update_id_from": sequence,
+                "update_id_to": sequence,
                 "bids": data.get("b", []),
                 "asks": data.get("a", []),
             }
@@ -60,3 +90,6 @@ def _safe_int(value: Any, default: int = None) -> int:
     except (TypeError, ValueError):
         return default
 
+
+class _BybitResyncRequired(RuntimeError):
+    pass
