@@ -733,15 +733,18 @@ def main():
             flush_and_commit(force=False)
             continue
 
-        target = stream_state["snapshot_last_update_id"] + 1
+        snapshot_u = stream_state["snapshot_last_update_id"]
+        target = snapshot_u + 1
+        bridge_by_prev = prev_sequence is not None and prev_sequence == snapshot_u
 
-        # 1) Before alignment: accept ONLY a bridging delta (U <= target <= u).
+        # 1) Before alignment: accept a bridging delta either by range (Binance-style)
+        # or by explicit previous sequence chaining (OKX-style).
         if not stream_state["aligned"]:
             if u_to < target:
                 # Entirely before the snapshot -> ignore
                 continue
 
-            if u_from <= target <= u_to:
+            if bridge_by_prev or u_from <= target <= u_to:
                 rows, _ = apply_updates(
                     exchange=exchange,
                     market=market,
@@ -762,7 +765,8 @@ def main():
                 stream_state["expected_next_u"] = u_to + 1
 
                 print(
-                    f"[processor] stream={stream_key} aligned on delta U={u_from}..u={u_to} target={target} "
+                    f"[processor] stream={stream_key} aligned on delta U={u_from}..u={u_to} "
+                    f"prev={prev_sequence} target={target} bridge_by_prev={bridge_by_prev} "
                     f"closed_rows={len(rows)} open_levels={len(book_state)}"
                 )
                 flush_and_commit(force=False)

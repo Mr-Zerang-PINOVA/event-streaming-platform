@@ -122,10 +122,11 @@ services:
     environment:
       KAFKA_BROKER: kafka:9092
       KAFKA_TOPIC: md.norm.depth.v1
+      CONSUMER_CONFIG_PATH: /app/config/config.docker.yaml
       CONSUMER_ENV: dev
       CONSUMER_ROLE: sink.clickhouse
       CONSUMER_LAYER: scd
-      CONSUMER_GROUP_VERSION: 1
+      CONSUMER_GROUP_VERSION: 3
       ENABLE_AUTO_COMMIT: "false"
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123

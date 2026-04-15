@@ -37,18 +37,30 @@ class OKXCollector(BaseCollector):
         if not isinstance(data, list):
             return []
 
+        action = str(payload.get("action", "update")).lower()
+        event_type = "snapshot" if action == "snapshot" else "delta"
+
         updates: List[Dict[str, Any]] = []
         for item in data:
             if not isinstance(item, dict):
                 continue
-            action = str(item.get("action", "update")).lower()
-            event_type = "snapshot" if action == "snapshot" else "delta"
+            sequence = _safe_int(item.get("seqId"))
+            prev_sequence = _safe_int(item.get("prevSeqId"))
+            if event_type == "snapshot":
+                update_id_from = sequence
+                update_id_to = sequence
+            else:
+                # OKX deltas bridge snapshots via prevSeqId -> seqId, not via contiguous +1 ranges.
+                update_id_from = prev_sequence if prev_sequence is not None and prev_sequence >= 0 else sequence
+                update_id_to = sequence
             updates.append(
                 {
                     "event_type": event_type,
                     "event_time_ms": _safe_int(item.get("ts"), int(time.time() * 1000)),
-                    "sequence": _safe_int(item.get("seqId")),
-                    "prev_sequence": _safe_int(item.get("prevSeqId")),
+                    "sequence": sequence,
+                    "prev_sequence": prev_sequence,
+                    "update_id_from": update_id_from,
+                    "update_id_to": update_id_to,
                     "bids": item.get("bids", []),
                     "asks": item.get("asks", []),
                 }
@@ -62,4 +74,3 @@ def _safe_int(value: Any, default: int = None) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-

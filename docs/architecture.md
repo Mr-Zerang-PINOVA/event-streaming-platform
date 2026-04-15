@@ -172,6 +172,91 @@ Examples:
 
 This design keeps exchange-specific parsing isolated and makes per-symbol failures easier to observe and recover from.
 
+### Exchange Stream Semantics
+
+Order book streams are not identical across exchanges. In general, exchanges follow one of these patterns:
+
+- Snapshot + delta: a full order book snapshot establishes the initial state and later updates modify that state incrementally.
+- Delta-only: only changes are streamed, so the consumer must already have a valid starting state from another source.
+- WebSocket snapshot + WebSocket updates: the stream itself sends the initial snapshot and later updates on the same connection.
+
+This difference matters because correctness depends on:
+
+- Starting from a valid snapshot or baseline.
+- Applying updates in the correct order.
+- Detecting gaps, stale streams, or resets.
+- Forcing a resync when continuity is broken.
+
+#### Binance
+
+Binance uses a `REST snapshot + WebSocket delta` model.
+
+General behavior:
+
+- Subscribe to the WebSocket depth stream.
+- Buffer incoming deltas.
+- Fetch a REST order book snapshot.
+- Find the first buffered delta that bridges the snapshot.
+- Apply later deltas in sequence.
+
+Important sequencing fields:
+
+- `lastUpdateId` from the REST snapshot
+- `U` = first update ID in a WebSocket event
+- `u` = final update ID in a WebSocket event
+- `pu` may also be present on some streams as the previous final update ID
+
+Meaning:
+
+- Binance requires explicit synchronization logic between REST and WebSocket.
+- If sequence continuity is broken, the local book should be rebuilt from a new snapshot.
+
+#### Bybit
+
+Bybit generally uses a `WebSocket snapshot + WebSocket delta` model.
+
+General behavior:
+
+- Subscribe to the order book topic.
+- Receive a snapshot message first.
+- Receive later delta messages afterward.
+- Rebuild local state from the snapshot and then apply later updates in order.
+
+Typical fields:
+
+- `type` often indicates `snapshot` or `delta`
+- `u` or `seq` may represent update ordering
+- `cts` or stream timestamps may be included
+
+Meaning:
+
+- Bybit does not usually require a separate REST snapshot for normal stream bootstrap.
+- The collector should treat the first snapshot as the baseline.
+- If continuity is lost or the stream becomes stale, the safest action is to resubscribe and rebuild from the next snapshot.
+
+#### OKX
+
+OKX `books` channel uses a `WebSocket snapshot + WebSocket update` model.
+
+General behavior:
+
+- Subscribe to the `books` channel.
+- Receive an initial full snapshot on the WebSocket.
+- Receive later incremental updates on the same WebSocket connection.
+
+Important sequencing fields:
+
+- `action = "snapshot"` for the full snapshot
+- `action = "update"` for incremental changes
+- `seqId` = current sequence
+- `prevSeqId` = previous sequence
+
+Meaning:
+
+- OKX does not need the Binance-style REST bootstrap for the `books` channel.
+- Synchronization depends on correctly handling `snapshot` vs `update`.
+- Continuity is checked using `prevSeqId -> seqId`.
+
 ### Data Frequency / Request Timing
 
 This pipeline mainly uses WebSocket subscriptions, so most raw market data is not pulled on a fixed polling interval. Exchanges push updates whenever the subscribed stream emits data.

@@ -32,9 +32,9 @@ consumer:
     env: "dev"
     role: "sink.clickhouse"
     layer: "scd"
-    version: 2
+    version: 3
   kafka:
-    auto_offset_reset: "earliest"
+    auto_offset_reset: "latest"
     enable_auto_commit: false
 
 exchanges:
