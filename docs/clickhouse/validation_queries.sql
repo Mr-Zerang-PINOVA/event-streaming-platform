@@ -246,21 +246,22 @@ LIMIT 20;
 
 
 -- ------------------------------------------------------------
--- 9) Ingest delay spot check
--- Compare processor ingest time vs source event time
--- valid_from is stored in microseconds for this derived check
+-- 9) Near-real-time delay spot check
+-- Compare source event time and collector receive time to DB ingest time
 -- ------------------------------------------------------------
 
 SELECT
+    exchange,
+    market,
     symbol,
+    event_type,
+    event_time_ms,
+    collector_receive_ts_ms,
     ingest_ts,
-    intDiv(valid_from, 1000000) AS source_event_ms,
-    round((ingest_ts - intDiv(valid_from, 1000000)) / 1000.0, 3) AS scd_delay_seconds,
-    side,
-    price,
-    qty,
+    round((ingest_ts - event_time_ms) / 1000.0, 3) AS source_to_db_seconds,
+    round((ingest_ts - collector_receive_ts_ms) / 1000.0, 3) AS collector_to_db_seconds,
     update_id_to
-FROM marketdata.orderbook_levels_scd
+FROM marketdata.orderbook_events_raw
 WHERE exchange = 'binance'
   AND market = 'futures'
   AND symbol IN ('BTCUSDT', 'ETHUSDT')

@@ -40,7 +40,7 @@ consumer:
 exchanges:
   binance:
     enabled: true
-    websocket_max_queue: 32
+    websocket_max_queue: 8
     websocket_max_size_bytes: 1048576
     markets:
       spot:
@@ -68,6 +68,7 @@ exchanges:
 
   bybit:
     enabled: true
+    websocket_max_queue: 8
     markets:
       spot:
         enabled: true
@@ -84,6 +85,7 @@ exchanges:
 
   okx:
     enabled: true
+    websocket_max_queue: 8
     markets:
       margin:
         enabled: true

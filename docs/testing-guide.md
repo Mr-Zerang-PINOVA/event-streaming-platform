@@ -144,15 +144,17 @@ docker exec -it clickhouse clickhouse-client -u clickhouse --password clickhouse
 docker exec -it clickhouse clickhouse-client -u clickhouse --password clickhouse -d marketdata -q "SELECT exchange, market, symbol, count() AS scd_row_count FROM orderbook_levels_scd GROUP BY exchange, market, symbol ORDER BY scd_row_count DESC"
 docker exec -it clickhouse clickhouse-client -u clickhouse --password clickhouse -d marketdata -q "
 SELECT
+    exchange,
+    market,
     symbol,
+    event_type,
+    event_time_ms,
+    collector_receive_ts_ms,
     ingest_ts,
-    intDiv(valid_from, 1000000) AS source_event_ms,
-    round((ingest_ts - intDiv(valid_from, 1000000)) / 1000.0, 3) AS scd_delay_seconds,
-    side,
-    price,
-    qty,
+    round((ingest_ts - event_time_ms) / 1000.0, 3) AS source_to_db_seconds,
+    round((ingest_ts - collector_receive_ts_ms) / 1000.0, 3) AS collector_to_db_seconds,
     update_id_to
-FROM orderbook_levels_scd
+FROM orderbook_events_raw
 WHERE exchange = 'binance'
   AND market = 'futures'
   AND symbol IN ('BTCUSDT', 'ETHUSDT')
