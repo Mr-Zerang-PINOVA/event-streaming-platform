@@ -179,16 +179,28 @@ class KafkaDepthProducer:
             await admin_client.close()
 
     async def send_raw_update(self, event: Dict) -> None:
-        topic = self._build_raw_topic(event.get("exchange"), event.get("market"))
-        await self._send(topic=topic, event=event)
+        delivery = await self.queue_raw_update(event)
+        await delivery
 
     async def send_normalized_update(self, event: Dict) -> None:
-        await self._send(topic=self.settings.topics.normalized, event=event)
+        delivery = await self.queue_normalized_update(event)
+        await delivery
 
     async def send_scd_update(self, event: Dict) -> None:
-        await self._send(topic=self.settings.topics.scd, event=event)
+        delivery = await self.queue_scd_update(event)
+        await delivery
 
-    async def _send(self, topic: str, event: Dict) -> None:
+    async def queue_raw_update(self, event: Dict):
+        topic = self._build_raw_topic(event.get("exchange"), event.get("market"))
+        return await self._queue_send(topic=topic, event=event)
+
+    async def queue_normalized_update(self, event: Dict):
+        return await self._queue_send(topic=self.settings.topics.normalized, event=event)
+
+    async def queue_scd_update(self, event: Dict):
+        return await self._queue_send(topic=self.settings.topics.scd, event=event)
+
+    async def _queue_send(self, topic: str, event: Dict):
         if self._producer is None:
             raise RuntimeError("Kafka producer is not started")
 
@@ -199,17 +211,16 @@ class KafkaDepthProducer:
         )
         for attempt in range(1, self.settings.max_send_retries + 1):
             try:
-                await self._producer.send_and_wait(
+                return await self._producer.send(
                     topic=topic,
                     key=key,
                     value=event,
                 )
-                return
             except asyncio.CancelledError:
                 raise
             except Exception:
                 self.logger.exception(
-                    "Kafka publish failed attempt=%s stream=%s topic=%s",
+                    "Kafka enqueue failed attempt=%s stream=%s topic=%s",
                     attempt,
                     key.decode("utf-8"),
                     topic,
@@ -217,6 +228,13 @@ class KafkaDepthProducer:
                 if attempt >= self.settings.max_send_retries:
                     raise
                 await asyncio.sleep(self.settings.retry_backoff_seconds * attempt)
+
+    @staticmethod
+    async def wait_deliveries(deliveries: Iterable) -> None:
+        pending = [delivery for delivery in deliveries if delivery is not None]
+        if not pending:
+            return
+        await asyncio.gather(*pending)
 
     def _build_raw_topic(self, exchange: Optional[str], market: Optional[str]) -> str:
         try:

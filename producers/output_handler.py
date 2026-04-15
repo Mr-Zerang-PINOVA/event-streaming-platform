@@ -10,6 +10,8 @@ from producers.kafka_producer import KafkaDepthProducer
 
 
 class OutputHandler:
+    _SCD_DELIVERY_BATCH_SIZE = 256
+
     def __init__(
         self,
         data_processor: DataProcessor,
@@ -119,7 +121,7 @@ class OutputHandler:
             raw_payload=raw_payload,
             collector_receive_ts_ms=collector_receive_ts_ms,
         )
-        await self.kafka_producer.send_raw_update(raw_event)
+        delivery_batch = [await self.kafka_producer.queue_raw_update(raw_event)]
 
         normalized = self.data_processor.process(
             exchange,
@@ -133,15 +135,21 @@ class OutputHandler:
             },
         )
         if normalized is None:
+            await self.kafka_producer.wait_deliveries(delivery_batch)
             return
 
-        await self.kafka_producer.send_normalized_update(normalized)
+        delivery_batch.append(await self.kafka_producer.queue_normalized_update(normalized))
 
         scd_events = []
         if self.enable_scd_topic:
             scd_events = self.scd_processor.process(normalized)
             for scd_event in scd_events:
-                await self.kafka_producer.send_scd_update(scd_event)
+                delivery_batch.append(await self.kafka_producer.queue_scd_update(scd_event))
+                if len(delivery_batch) >= self._SCD_DELIVERY_BATCH_SIZE:
+                    await self.kafka_producer.wait_deliveries(delivery_batch)
+                    delivery_batch.clear()
+
+        await self.kafka_producer.wait_deliveries(delivery_batch)
 
         self.logger.debug(
             "Published layered events stream=%s event_type=%s sequence=%s scd_count=%s",

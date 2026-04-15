@@ -221,7 +221,6 @@ def main():
         if not rows:
             return
         pending_scd_rows.extend(rows)
-        flush_rows(force=False)
 
     def mark_seen_event(event_id: str) -> bool:
         """Returns True if event_id is duplicate in this process lifetime cache."""
@@ -287,7 +286,6 @@ def main():
             json.dumps(event.get("asks", []), separators=(",", ":")),
             now_ms(),
         ])
-        flush_rows(force=False)
 
     print(
         f"[processor] consuming topic={TOPIC_ORDERBOOK} broker={KAFKA_BROKER} "
@@ -619,7 +617,6 @@ def main():
         if mark_seen_event(str(event_id) if event_id is not None else ""):
             flush_and_commit(force=False)
             continue
-        flush_rows(force=False)
 
         bids = parse_levels(event.get("bids", []))
         asks = parse_levels(event.get("asks", []))
