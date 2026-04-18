@@ -37,3 +37,4 @@ Keeping these queries in a dedicated SQL file makes them easier to reuse during 
 - `event_type` is usually `snapshot` or `delta`.
 - `valid_from` is a composite version identifier produced by the processor, not a human timestamp.
 - `bids_json` and `asks_json` store arrays like `[["price","qty"], ...]`.
+- New SCD writes no longer store `event_id`; after deploying the updated processor, run `ALTER TABLE marketdata.orderbook_levels_scd DROP COLUMN event_id` if you also want to reclaim space from existing data.

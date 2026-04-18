@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from kafka import KafkaConsumer
 import clickhouse_connect
 
-from contracts.event_ids import make_scd_row_id, resolve_event_id
+from contracts.event_ids import resolve_event_id
 from consumer_config import resolve_consumer_runtime_config
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
@@ -70,7 +70,6 @@ def ensure_clickhouse_tables(client) -> None:
             closed_by      Nullable(String),
             update_id_from UInt64,
             update_id_to   UInt64,
-            event_id       String,
             ingest_ts      UInt64
         )
         ENGINE = MergeTree
@@ -172,7 +171,7 @@ def main():
                 column_names=[
                     "exchange", "market", "symbol", "side", "price", "qty",
                     "valid_from", "valid_to", "opened_by", "closed_by",
-                    "update_id_from", "update_id_to", "event_id", "ingest_ts",
+                    "update_id_from", "update_id_to", "ingest_ts",
                 ],
             )
             pending_scd_rows = []
@@ -309,29 +308,13 @@ def main():
         u_from,
         u_to,
         source_event_type,
-        source_event_id,
     ):
         ingest_ts = now_ms()
-        row_event_id = make_scd_row_id(
-            exchange=exchange,
-            market=market,
-            symbol=symbol,
-            side=side,
-            price=price,
-            qty=prev["qty"],
-            valid_from_ms=prev["valid_from"],
-            valid_to_ms=valid_to,
-            source_event_id=source_event_id,
-            change_type="close",
-            source_sequence=u_to,
-            open_sequence=prev.get("open_sequence"),
-            close_sequence=u_to,
-        )
         return [
             exchange, market, symbol, side, price, prev["qty"],
             prev["valid_from"], valid_to,
             prev["origin_type"], source_event_type,
-            u_from, u_to, row_event_id, ingest_ts
+            u_from, u_to, ingest_ts
         ]
 
     def open_level(
@@ -345,30 +328,13 @@ def main():
         source_event_type,
         u_from,
         u_to,
-        source_event_id,
-        change_type,
     ):
         ingest_ts = now_ms()
-        row_event_id = make_scd_row_id(
-            exchange=exchange,
-            market=market,
-            symbol=symbol,
-            side=side,
-            price=price,
-            qty=qty,
-            valid_from_ms=valid_from,
-            valid_to_ms=None,
-            source_event_id=source_event_id,
-            change_type=change_type,
-            source_sequence=u_to,
-            open_sequence=u_to,
-            close_sequence=None,
-        )
         return [
             exchange, market, symbol, side, price, qty,
             valid_from, None,
             source_event_type, None,
-            u_from, u_to, row_event_id, ingest_ts
+            u_from, u_to, ingest_ts
         ]
 
     def apply_updates(
@@ -379,7 +345,6 @@ def main():
         event_time_ms,
         u_from,
         u_to,
-        source_event_id,
         bids,
         asks,
         book_state,
@@ -407,7 +372,6 @@ def main():
                                     valid_to=valid_from,
                                     u_from=u_from, u_to=u_to,
                                     source_event_type=source_event_type,
-                                    source_event_id=source_event_id,
                                 )
                             )
                         else:
@@ -427,8 +391,6 @@ def main():
                                 valid_from,
                                 source_event_type,
                                 u_from, u_to,
-                                source_event_id=source_event_id,
-                                change_type="open",
                             )
                         )
                     else:
@@ -455,7 +417,6 @@ def main():
                             valid_to=valid_from,
                             u_from=u_from, u_to=u_to,
                             source_event_type=source_event_type,
-                            source_event_id=source_event_id,
                         )
                     )
                 else:
@@ -471,8 +432,6 @@ def main():
                             valid_from,
                             source_event_type,
                             u_from, u_to,
-                            source_event_id=source_event_id,
-                            change_type="update",
                         )
                     )
                 else:
@@ -493,7 +452,6 @@ def main():
         symbol,
         event_time_ms,
         snapshot_u,
-        source_event_id,
         book_state,
     ):
         nonlocal duplicate_close_skipped
@@ -520,7 +478,6 @@ def main():
                     u_from=snapshot_u,
                     u_to=snapshot_u,
                     source_event_type="snapshot",
-                    source_event_id=source_event_id,
                 )
             )
 
@@ -533,7 +490,6 @@ def main():
         symbol,
         event_time_ms,
         u_to,
-        source_event_id,
         require_snapshot: bool = False,
     ):
         nonlocal total_rows_processed
@@ -543,7 +499,6 @@ def main():
             symbol=symbol,
             event_time_ms=event_time_ms,
             snapshot_u=u_to,
-            source_event_id=source_event_id,
             book_state=stream_state["book_state"],
         )
         append_rows(reset_close_rows)
@@ -654,7 +609,6 @@ def main():
                 symbol=symbol,
                 event_time_ms=event_time_ms,
                 snapshot_u=incoming_snapshot_u,
-                source_event_id=event_id,
                 book_state=book_state,
             )
             append_rows(snapshot_close_rows)
@@ -672,7 +626,6 @@ def main():
                 event_time_ms=event_time_ms,
                 u_from=incoming_snapshot_u,
                 u_to=incoming_snapshot_u,
-                source_event_id=event_id,
                 bids=bids,
                 asks=asks,
                 book_state=book_state,
@@ -706,7 +659,6 @@ def main():
                 event_time_ms=event_time_ms,
                 u_from=u_from,
                 u_to=u_to,
-                source_event_id=event_id,
                 bids=bids,
                 asks=asks,
                 book_state=book_state,
@@ -750,7 +702,6 @@ def main():
                     event_time_ms=event_time_ms,
                     u_from=u_from,
                     u_to=u_to,
-                    source_event_id=event_id,
                     bids=bids,
                     asks=asks,
                     book_state=book_state,
@@ -781,7 +732,6 @@ def main():
                 symbol=symbol,
                 event_time_ms=event_time_ms,
                 u_to=u_to,
-                source_event_id=event_id,
                 require_snapshot=True,
             )
             flush_and_commit(force=False)
@@ -806,7 +756,6 @@ def main():
                         symbol=symbol,
                         event_time_ms=event_time_ms,
                         u_to=u_to,
-                        source_event_id=event_id,
                         require_snapshot=True,
                     )
                     flush_and_commit(force=False)
@@ -824,7 +773,6 @@ def main():
                     symbol=symbol,
                     event_time_ms=event_time_ms,
                     u_to=u_to,
-                    source_event_id=event_id,
                     require_snapshot=True,
                 )
                 flush_and_commit(force=False)
@@ -839,7 +787,6 @@ def main():
             event_time_ms=event_time_ms,
             u_from=u_from,
             u_to=u_to,
-            source_event_id=event_id,
             bids=bids,
             asks=asks,
             book_state=book_state,

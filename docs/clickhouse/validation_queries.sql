@@ -286,8 +286,7 @@ SELECT
     opened_by,
     closed_by,
     update_id_from,
-    update_id_to,
-    event_id
+    update_id_to
 FROM marketdata.orderbook_levels_scd
 WHERE exchange = 'binance'
   AND market = 'futures'
