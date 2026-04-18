@@ -37,24 +37,36 @@ ORDER BY scd_row_count DESC;
 
 -- ------------------------------------------------------------
 -- 3) Lifecycle source checks
--- opened_by is usually 'snapshot' or 'delta'
+-- opened_by_code / closed_by_code mapping:
+--   1 = snapshot
+--   2 = delta
 -- ------------------------------------------------------------
 
 SELECT
-    opened_by,
+    opened_by_code,
+    multiIf(
+        opened_by_code = 1, 'snapshot',
+        opened_by_code = 2, 'delta',
+        concat('unknown:', toString(opened_by_code))
+    ) AS opened_by_label,
     symbol,
     market,
     count() AS rows_cnt
 FROM marketdata.orderbook_levels_scd
-GROUP BY opened_by, symbol, market
-ORDER BY rows_cnt DESC, opened_by, symbol;
+GROUP BY opened_by_code, opened_by_label, symbol, market
+ORDER BY rows_cnt DESC, opened_by_code, symbol;
 
 SELECT
-    opened_by,
+    opened_by_code,
+    multiIf(
+        opened_by_code = 1, 'snapshot',
+        opened_by_code = 2, 'delta',
+        concat('unknown:', toString(opened_by_code))
+    ) AS opened_by_label,
     count() AS rows_cnt
 FROM marketdata.orderbook_levels_scd
-GROUP BY opened_by
-ORDER BY rows_cnt DESC, opened_by;
+GROUP BY opened_by_code, opened_by_label
+ORDER BY rows_cnt DESC, opened_by_code;
 
 
 -- ------------------------------------------------------------
@@ -219,12 +231,12 @@ LIMIT 10;
 
 SELECT *
 FROM marketdata.orderbook_levels_scd
-WHERE opened_by = 'snapshot'
+WHERE opened_by_code = 1
 LIMIT 10;
 
 SELECT *
 FROM marketdata.orderbook_levels_scd
-WHERE opened_by = 'delta'
+WHERE opened_by_code = 2
 LIMIT 10;
 
 
@@ -283,8 +295,8 @@ SELECT
     qty,
     valid_from,
     valid_to,
-    opened_by,
-    closed_by,
+    opened_by_code,
+    closed_by_code,
     update_id_from,
     update_id_to
 FROM marketdata.orderbook_levels_scd

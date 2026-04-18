@@ -29,6 +29,13 @@ VERSION_KEY_CACHE_SIZE = int(os.getenv("VERSION_KEY_CACHE_SIZE", "500000"))
 
 SYMBOL = os.getenv("SYMBOL", "BTCUSDT")
 
+ORIGIN_CODE_SNAPSHOT = 1
+ORIGIN_CODE_DELTA = 2
+ORIGIN_CODE_BY_EVENT_TYPE = {
+    "snapshot": ORIGIN_CODE_SNAPSHOT,
+    "delta": ORIGIN_CODE_DELTA,
+}
+
 
 def now_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -66,8 +73,8 @@ def ensure_clickhouse_tables(client) -> None:
             qty            Float64,
             valid_from     UInt64,
             valid_to       Nullable(UInt64),
-            opened_by      LowCardinality(String),
-            closed_by      Nullable(String),
+            opened_by_code UInt8,
+            closed_by_code Nullable(UInt8),
             update_id_from UInt64,
             update_id_to   UInt64,
             ingest_ts      UInt64
@@ -75,6 +82,20 @@ def ensure_clickhouse_tables(client) -> None:
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(toDateTime(intDiv(valid_from, 1000000)))
         ORDER BY (exchange, market, symbol, side, price, valid_from)
+        """
+    )
+    client.command(
+        f"""
+        ALTER TABLE {CLICKHOUSE_DATABASE}.{CLICKHOUSE_SCD_TABLE}
+        ADD COLUMN IF NOT EXISTS opened_by_code UInt8
+        AFTER valid_to
+        """
+    )
+    client.command(
+        f"""
+        ALTER TABLE {CLICKHOUSE_DATABASE}.{CLICKHOUSE_SCD_TABLE}
+        ADD COLUMN IF NOT EXISTS closed_by_code Nullable(UInt8)
+        AFTER opened_by_code
         """
     )
     client.command(
@@ -121,6 +142,17 @@ def make_valid_from(event_time_ms: int, version_seq: int) -> int:
     Keep ms time + inject ordering from version_seq (update_id_to).
     """
     return event_time_ms * 1_000_000 + (version_seq % 1_000_000)
+
+
+def to_origin_code(event_type: str) -> int:
+    normalized = str(event_type or "").strip().lower()
+    try:
+        return ORIGIN_CODE_BY_EVENT_TYPE[normalized]
+    except KeyError as exc:
+        raise ValueError(
+            f"unsupported source event type for SCD origin code: {event_type!r}"
+        ) from exc
+
 
 def make_level_version_key(exchange, market, symbol, side, price, valid_from, qty):
     # Logical uniqueness key for one SCD version.
@@ -170,7 +202,7 @@ def main():
                 data=pending_scd_rows,
                 column_names=[
                     "exchange", "market", "symbol", "side", "price", "qty",
-                    "valid_from", "valid_to", "opened_by", "closed_by",
+                    "valid_from", "valid_to", "opened_by_code", "closed_by_code",
                     "update_id_from", "update_id_to", "ingest_ts",
                 ],
             )
@@ -313,7 +345,7 @@ def main():
         return [
             exchange, market, symbol, side, price, prev["qty"],
             prev["valid_from"], valid_to,
-            prev["origin_type"], source_event_type,
+            prev["origin_type_code"], to_origin_code(source_event_type),
             u_from, u_to, ingest_ts
         ]
 
@@ -333,7 +365,7 @@ def main():
         return [
             exchange, market, symbol, side, price, qty,
             valid_from, None,
-            source_event_type, None,
+            to_origin_code(source_event_type), None,
             u_from, u_to, ingest_ts
         ]
 
@@ -350,6 +382,7 @@ def main():
         book_state,
     ):
         rows_to_write = []
+        source_event_type_code = to_origin_code(source_event_type)
 
         valid_from = make_valid_from(int(event_time_ms), int(u_to))
 
@@ -398,7 +431,7 @@ def main():
                     book_state[key] = {
                         "qty": qty,
                         "valid_from": valid_from,
-                        "origin_type": source_event_type,
+                        "origin_type_code": source_event_type_code,
                     }
                     continue
 
@@ -439,7 +472,7 @@ def main():
                 book_state[key] = {
                     "qty": qty,
                     "valid_from": valid_from,
-                    "origin_type": source_event_type,
+                    "origin_type_code": source_event_type_code,
                 }
 
         apply_side("bid", bids)
