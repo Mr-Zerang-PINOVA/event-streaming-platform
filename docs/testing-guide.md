@@ -26,12 +26,16 @@ free -h
 cat /proc/meminfo | egrep 'MemAvailable|Cached|Buffers'
 ```
 
-Expected:
-- `MemAvailable` is not critically low
-- `Cached` and `Buffers` are present, which is normal on Linux
-- If available memory is consistently tight, Docker services may slow down or restart under pressure
+### 1.2 Host disk and Docker storage check
 
-### 1.2 Pipeline WebSocket buffering settings
+Use this when builds suddenly fail, containers stop starting, Docker pulls hang, or the host is running low on disk.
+
+```bash
+df -h
+docker system df -v
+sudo du -xh --max-depth=2 /var/lib/docker | sort -h | tail -n 30
+```
+### 1.3 Pipeline WebSocket buffering settings
 
 These settings affect how much incoming market-data traffic can be buffered in memory before the collector processes it.
 
@@ -232,22 +236,37 @@ watch -n 5 "docker exec kafka bash -lc 'kafka-consumer-groups --bootstrap-server
 docker exec -it kafka bash -lc "kafka-topics --bootstrap-server kafka:9092 --describe --topic md.norm.depth.v1"
 ```
 
-### 5.5 Approx latest offsets (queue depth input)
+## 6) Lightweight Telegram Alert for SCD Ingest Stalls
+
+Use `scripts/alert_clickhouse_ingest_stall.py` to send a Telegram alert when `marketdata.orderbook_levels_scd` stops receiving new rows for a configurable amount of time.
 
 ```bash
-docker exec -it kafka bash -lc "kafka-run-class kafka.tools.GetOffsetShell --broker-list kafka:9092 --topic md.norm.depth.v1 --time -1"
+cd /home/ubuntu/event-streaming-platform
+
+export TELEGRAM_BOT_TOKEN="123456:replace_me"
+export TELEGRAM_CHAT_ID="replace_me"
+
+python3 scripts/alert_clickhouse_ingest_stall.py \
+  --clickhouse-host localhost \
+  --clickhouse-port 8123 \
+  --clickhouse-database marketdata \
+  --clickhouse-table orderbook_levels_scd \
+  --max-idle-seconds 300 \
+  --poll-interval-seconds 60
 ```
 
-Interpretation:
-- Increasing `LAG` means consumer is falling behind.
-- Stable near-zero `LAG` means healthy consumption.
+Notes:
+- Use `--max-idle-seconds 120` for a 2-minute alert threshold or `300` for 5 minutes.
+- The script sends one Telegram alert per stall incident and one recovery message after inserts resume.
+- To test the alert manually, stop the ClickHouse writer in another terminal:
 
+```bash
+docker compose stop processor
+```
 
-# 1) Find consumer groups
-docker exec -it kafka bash -lc "kafka-consumer-groups --bootstrap-server kafka:9092 --list"
+- After the alert fires, start it again to verify the recovery message:
 
-# 2) Show per-partition lag for one group
-docker exec -it kafka bash -lc "kafka-consumer-groups --bootstrap-server kafka:9092 --describe --group md.dev.sink.clickhouse.scd.v1"
-
-# 3) Watch it live
-watch -n 5 "docker exec kafka bash -lc 'kafka-consumer-groups --bootstrap-server kafka:9092 --describe --group md.dev.sink.clickhouse.scd.v1'"
+```bash
+docker compose start processor
+```
+ 

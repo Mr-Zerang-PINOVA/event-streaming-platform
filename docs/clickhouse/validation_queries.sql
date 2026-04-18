@@ -19,7 +19,7 @@ FROM marketdata.orderbook_levels_scd;
 
 SELECT count() AS raw_rows
 FROM marketdata.orderbook_events_raw;
-
+scripts/__pycache__
 
 -- ------------------------------------------------------------
 -- 2) Coverage: symbols, markets, exchanges
