@@ -242,5 +242,4 @@ class OutputHandler:
             "update_id_to": raw_update.get("update_id_to"),
             "bids": raw_update.get("bids", []),
             "asks": raw_update.get("asks", []),
-            "source_payload": raw_payload,
         }
